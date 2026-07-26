@@ -691,13 +691,17 @@ class ExpeditionMission extends GameMission
         // Get origin planet for battle context
         $originPlanet = $this->planetServiceFactory->make($mission->planet_id_from, true);
 
+        $basePlanet = $originPlanet->isMoon()
+            ? ($originPlanet->getParentPlanet() ?? $originPlanet)
+            : $originPlanet;
+
         // Create NPC planet service for the battle
         $npcPlanetService = new NPCPlanetService(
             $this->playerServiceFactory,
             $this->settings,
             $npcPlayer,
             $npcFleet,
-            $originPlanet->getPlanetId()
+            $basePlanet->getPlanetId()
         );
 
         // Run the battle with player as attacker and NPC as defender

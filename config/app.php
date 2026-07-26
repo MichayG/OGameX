@@ -129,4 +129,5 @@ return [
      */
     'version' => '0.14.0',
     'discord_alert_webhook' => env('DISCORD_ALERT_WEBHOOK', false),
+    'player_import_password' => env('PLAYER_IMPORT_PASSWORD'),
 ];

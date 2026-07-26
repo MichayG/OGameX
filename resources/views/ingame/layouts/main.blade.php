@@ -47,8 +47,7 @@
 
     <title>{{ config('app.name', 'Laravel') }}</title>
 
-    <link rel="stylesheet" href="{{ mix('css/ingame.css') }}">
-    <script src="{{ mix('js/ingame.min.js') }}"></script>
+    @vite(['resources/css/ingame.css', 'resources/js/ingame.js'])
 
     <script type="text/javascript">
         // Define timerHandler globally to prevent simpleCountdown errors
@@ -876,7 +875,7 @@
                 var userData = {
                     "id": "108130"
                 };
-                var missleAttackLink = "{{ route('overview.index') }}#TODO_page=missileattacklayer&width=669&height=250";
+                var missleAttackLink = "{{ route('galaxy.missile-attack.overlay') }}?width=669&height=250";
                 var changeNickLink = "{{ route('changenick.overlay') }}";
                 var showOutlawWarning = true;
                 var miniFleetLink = "{{ route('fleet.dispatch.sendminifleet') }}";
@@ -1839,7 +1838,7 @@ However, the Space Dock's engineers think that some of the remains can be salvag
 
                                     @if ($wreckField && in_array($wreckField->status, ['active', 'blocked']) && !$planet->isMoon())
                                         @php
-                                            $hasSpaceDock = $currentPlayer->planets->current()->getObjectLevel('space_dock') > 0;
+                                            $hasSpaceDock = $planet->getObjectLevel('space_dock') > 0;
                                             $isOwner = $wreckField->owner_player_id === $currentPlayer->getId();
                                         @endphp
                                         @if ($isOwner && $hasSpaceDock)

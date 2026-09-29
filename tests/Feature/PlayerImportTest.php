@@ -170,6 +170,32 @@ class PlayerImportTest extends TestCase
         }
     }
 
+    public function test_inactive_status_sets_last_activity_seven_days_ago(): void
+    {
+        config()->set('app.player_import_password', 'import-test-password');
+
+        $coordinate = $this->getSafeEmptyCoordinate(new Coordinate(1, 310, 8));
+        $suffix = bin2hex(random_bytes(5));
+        $email = "import-inactive-{$suffix}@example.com";
+        $player = $this->playerData("import-inactive-{$suffix}", $email, $coordinate);
+        $player['profile']['status'] = 'inactive';
+
+        $importer = resolve(PlayerImporter::class);
+        $importer->import($this->temporaryJson($this->documentFor($player)));
+        $this->rememberAudit($importer);
+
+        $user = User::query()->where('email', $email)->firstOrFail();
+        $this->createdUserIds[] = $user->id;
+
+        $this->assertEqualsWithDelta(now()->subDays(7)->timestamp, (int)$user->time, 5);
+        $this->assertFalse($user->vacation_mode);
+        $this->assertNull($user->vacation_mode_activated_at);
+
+        $playerService = resolve(PlayerServiceFactory::class)->make($user->id);
+        $this->assertTrue($playerService->isInactive());
+        $this->assertFalse($playerService->isLongInactive());
+    }
+
     public function test_invalid_gzip_is_rejected(): void
     {
         config()->set('app.player_import_password', 'import-test-password');

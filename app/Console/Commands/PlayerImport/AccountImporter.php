@@ -28,17 +28,20 @@ class AccountImporter
             'username' => ['required', 'string', 'max:255', Rule::unique(User::class, 'username')],
             'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class, 'email')],
             'accountAgeDays' => ['required', 'integer', 'min:0'],
-            'status' => ['required', 'string', Rule::in(['active', 'banned', 'vacation'])],
+            'status' => ['required', 'string', Rule::in(['active', 'banned', 'vacation', 'inactive'])],
             'class' => ['nullable', 'string', Rule::in(['collector', 'general', 'discoverer'])],
         ])->validate();
 
         $registeredAt = now()->subDays((int)$validated['accountAgeDays']);
         $characterClass = $this->characterClass($validated['class'] ?? null);
         $isVacation = $validated['status'] === 'vacation';
+        // Galaxy inactivity is derived from last activity, not a stored status.
+        // Seven days is the threshold for the short inactive marker.
+        $lastActivity = $validated['status'] === 'inactive' ? now()->subDays(7) : now();
 
         // Importing is not a registration: suppress the first-user rename and
         // registration-only rewards while retaining normal Eloquent persistence.
-        $user = User::withoutEvents(function () use ($validated, $registeredAt, $characterClass, $isVacation): User {
+        $user = User::withoutEvents(function () use ($validated, $registeredAt, $characterClass, $isVacation, $lastActivity): User {
             $user = new User();
             $user->username = $validated['username'];
             $user->email = $validated['email'];
@@ -46,7 +49,7 @@ class AccountImporter
             $user->lang = 'en';
             $user->register_time = (string)$registeredAt->timestamp;
             // Last activity timestamp (galaxy inactive status / online checks).
-            $user->time = (string)now()->timestamp;
+            $user->time = (string)$lastActivity->timestamp;
             $user->character_class = $characterClass?->value;
             $user->character_class_free_used = $characterClass !== null;
             $user->character_class_changed_at = $characterClass !== null ? $registeredAt : null;

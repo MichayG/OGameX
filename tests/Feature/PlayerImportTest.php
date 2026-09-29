@@ -198,7 +198,7 @@ class PlayerImportTest extends TestCase
         $this->occupySlot($suffix, $coordinate);
 
         $email = "import-collision-{$suffix}@example.com";
-        $sourcePath = $this->temporaryJson($this->playerData("import-collision-{$suffix}", $email, $coordinate));
+        $sourcePath = $this->temporaryJson($this->documentFor($this->playerData("import-collision-{$suffix}", $email, $coordinate)));
         $importer = resolve(PlayerImporter::class);
 
         try {
@@ -226,7 +226,7 @@ class PlayerImportTest extends TestCase
         $relocations = [];
         $importer = resolve(PlayerImporter::class);
         $importer->import(
-            $this->temporaryJson($this->playerData("import-retry-{$suffix}", $email, $coordinate)),
+            $this->temporaryJson($this->documentFor($this->playerData("import-retry-{$suffix}", $email, $coordinate))),
             null,
             null,
             function (string $username, string $planetName, string $from, string $to) use (&$relocations): void {
@@ -276,7 +276,7 @@ class PlayerImportTest extends TestCase
 
         $email = "import-retry-system-{$suffix}@example.com";
         $importer = resolve(PlayerImporter::class);
-        $importer->import($this->temporaryJson($this->playerData("import-retry-system-{$suffix}", $email, $coordinate)));
+        $importer->import($this->temporaryJson($this->documentFor($this->playerData("import-retry-system-{$suffix}", $email, $coordinate))));
         $this->rememberAudit($importer);
 
         $user = User::query()->where('email', $email)->firstOrFail();
@@ -320,7 +320,7 @@ class PlayerImportTest extends TestCase
         $importer = resolve(PlayerImporter::class);
 
         try {
-            $importer->import($this->temporaryJson($this->playerData("import-exhausted-{$suffix}", $email, $coordinate)));
+            $importer->import($this->temporaryJson($this->documentFor($this->playerData("import-exhausted-{$suffix}", $email, $coordinate))));
             $this->fail('A full neighborhood should stop the import.');
         } catch (RuntimeException $exception) {
             $this->assertStringContainsString('no free slot was found', $exception->getMessage());
@@ -498,6 +498,19 @@ class PlayerImportTest extends TestCase
             'researches' => [
                 ['code' => 'weapon_technology', 'level' => 4],
             ],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $player
+     * @return array<string, mixed>
+     */
+    private function documentFor(array $player): array
+    {
+        return [
+            'version' => '1.0',
+            'generatedAt' => now()->toIso8601String(),
+            'players' => [$player],
         ];
     }
 

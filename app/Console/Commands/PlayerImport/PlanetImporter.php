@@ -82,6 +82,10 @@ class PlanetImporter
 
         $player->setCurrentPlanetId($currentPlanetId ?? $firstPlanetId);
 
+        // The load above runs before buildings are saved. Reload so requirement
+        // checks see the imported levels.
+        $player->load($player->getId());
+
         return $relocations;
     }
 

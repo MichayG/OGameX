@@ -10,7 +10,7 @@ Set one password for all imported accounts in the project `.env`:
 PLAYER_IMPORT_PASSWORD=replace-with-a-secure-password
 ```
 
-If configuration has previously been cached, refresh it:
+If configuration has previously been cached, refresh it. Do this upon changing an env variable's value:
 
 ```bash
 docker compose exec ogamex-app php artisan config:clear
@@ -43,6 +43,18 @@ docker compose exec ogamex-app php artisan ogamex:player-import /var/www/players
 ```
 
 The command stops at the first failed player. Each player is imported in its own database transaction, so that player's partial data is rolled back on failure. Players completed earlier in the run remain imported.
+
+## Occupied positions
+
+`PLAYER_IMPORT_RETRY_UPON_COLLISION` controls a planet whose coordinate is already taken:
+
+```dotenv
+PLAYER_IMPORT_RETRY_UPON_COLLISION=false
+```
+
+`false` stops the import. The player being imported is rolled back.
+
+`true` searches for a free slot in the same galaxy, one square at a time, up to offset 15. Offset 1 tries position +1, position -1, system +1, system -1, then the four diagonals. Offset 2 starts at position ±2 and the slots beside those positions. Slots outside the universe are skipped. The command prints each relocation. A moon moves with its planet. If every candidate is taken, the import stops.
 
 An audit JSON file is created at the start of the run under:
 

@@ -26,6 +26,7 @@ class PlayerImporter
     /**
      * @param Closure(string): void|null $onAuditCreated
      * @param Closure(User, int, int): void|null $onUserImported
+     * @param Closure(string, string, string, string): void|null $onPlanetRelocated
      * @return array{auditPath: string, imported: int}
      *
      * @throws JsonException
@@ -33,7 +34,8 @@ class PlayerImporter
     public function import(
         string $sourcePath,
         Closure|null $onAuditCreated = null,
-        Closure|null $onUserImported = null
+        Closure|null $onUserImported = null,
+        Closure|null $onPlanetRelocated = null
     ): array {
         $this->accountImporter->ensurePasswordIsConfigured();
         [$resolvedPath, $sourceFileChecksum, $document] = $this->loadDocument($sourcePath);
@@ -49,12 +51,14 @@ class PlayerImporter
             $label = $playerData['profile']['username'] ?? '#' . ($index + 1);
 
             try {
-                $user = DB::transaction(function () use ($playerData): User {
+                /** @var list<array{username: string, planetName: string, from: string, to: string}> $relocations */
+                $relocations = [];
+                $user = DB::transaction(function () use ($playerData, &$relocations): User {
                     $user = $this->accountImporter->import($playerData['profile']);
                     $player = $this->playerServiceFactory->make($user->id, true);
 
                     $this->researchImporter->import($player, $playerData['researches'] ?? []);
-                    $this->planetImporter->import($player, $playerData['planets']);
+                    $relocations = $this->planetImporter->import($player, $playerData['planets']);
                     $this->requirementsValidator->validate($player);
 
                     return $user;
@@ -62,6 +66,14 @@ class PlayerImporter
 
                 // Only audit after the transaction commits so a failed commit
                 // cannot leave a ghost entry for a rolled-back user.
+                foreach ($relocations as $relocation) {
+                    $onPlanetRelocated?->__invoke(
+                        $relocation['username'],
+                        $relocation['planetName'],
+                        $relocation['from'],
+                        $relocation['to']
+                    );
+                }
                 $this->auditWriter->append($user);
             } catch (Throwable $exception) {
                 throw new RuntimeException(

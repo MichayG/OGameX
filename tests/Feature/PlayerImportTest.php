@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Hash;
+use OGame\Console\Commands\PlayerImport\PlanetImporter;
 use OGame\Console\Commands\PlayerImport\PlayerImporter;
 use OGame\Console\Commands\PlayerImport\PlayerImportRollback;
 use OGame\Enums\CharacterClass;
 use OGame\Factories\PlayerServiceFactory;
+use OGame\GameConstants\UniverseConstants;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
@@ -184,6 +186,220 @@ class PlayerImportTest extends TestCase
         $this->expectExceptionMessage('Unable to decompress gzip player import file');
 
         resolve(PlayerImporter::class)->import($path);
+    }
+
+    public function test_occupied_position_aborts_when_retry_is_disabled(): void
+    {
+        config()->set('app.player_import_password', 'import-test-password');
+        config()->set('app.player_import_retry_upon_collision', false);
+
+        $coordinate = $this->getSafeEmptyCoordinate(new Coordinate(1, 270, 8));
+        $suffix = bin2hex(random_bytes(5));
+        $this->occupySlot($suffix, $coordinate);
+
+        $email = "import-collision-{$suffix}@example.com";
+        $sourcePath = $this->temporaryJson($this->playerData("import-collision-{$suffix}", $email, $coordinate));
+        $importer = resolve(PlayerImporter::class);
+
+        try {
+            $importer->import($sourcePath);
+            $this->fail('An occupied coordinate should stop the import when retry is disabled.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('already occupied', $exception->getMessage());
+            $this->assertStringNotContainsString('no free slot', $exception->getMessage());
+        }
+
+        $this->rememberAudit($importer);
+        $this->assertNull(User::query()->where('email', $email)->first());
+    }
+
+    public function test_retry_upon_collision_moves_to_the_next_position(): void
+    {
+        config()->set('app.player_import_password', 'import-test-password');
+        config()->set('app.player_import_retry_upon_collision', true);
+
+        $coordinate = $this->coordinateWithFreeNeighbors();
+        $suffix = bin2hex(random_bytes(5));
+        $this->occupySlot($suffix, $coordinate);
+
+        $email = "import-retry-{$suffix}@example.com";
+        $relocations = [];
+        $importer = resolve(PlayerImporter::class);
+        $importer->import(
+            $this->temporaryJson($this->playerData("import-retry-{$suffix}", $email, $coordinate)),
+            null,
+            null,
+            function (string $username, string $planetName, string $from, string $to) use (&$relocations): void {
+                $relocations[] = compact('username', 'planetName', 'from', 'to');
+            }
+        );
+        $this->rememberAudit($importer);
+
+        $user = User::query()->where('email', $email)->firstOrFail();
+        $this->createdUserIds[] = $user->id;
+
+        $planet = Planet::query()
+            ->where('user_id', $user->id)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->firstOrFail();
+        $this->assertSame($coordinate->galaxy, $planet->galaxy);
+        $this->assertSame($coordinate->system, $planet->system);
+        $this->assertSame($coordinate->position + 1, $planet->planet);
+        $this->assertSame([
+            [
+                'username' => $user->username,
+                'planetName' => 'Homeworld',
+                'from' => $coordinate->asString(),
+                'to' => $coordinate->galaxy . ':' . $coordinate->system . ':' . ($coordinate->position + 1),
+            ],
+        ], $relocations);
+
+        $moon = Planet::query()
+            ->where('user_id', $user->id)
+            ->where('planet_type', PlanetType::Moon->value)
+            ->firstOrFail();
+        $this->assertSame($planet->galaxy, $moon->galaxy);
+        $this->assertSame($planet->system, $moon->system);
+        $this->assertSame($planet->planet, $moon->planet);
+    }
+
+    public function test_retry_upon_collision_moves_to_the_next_system_when_positions_are_taken(): void
+    {
+        config()->set('app.player_import_password', 'import-test-password');
+        config()->set('app.player_import_retry_upon_collision', true);
+
+        $coordinate = $this->coordinateWithFreeNeighbors();
+        $suffix = bin2hex(random_bytes(5));
+        $occupant = $this->occupySlot($suffix, $coordinate);
+        $this->occupySlot($suffix, new Coordinate($coordinate->galaxy, $coordinate->system, $coordinate->position + 1), $occupant);
+        $this->occupySlot($suffix, new Coordinate($coordinate->galaxy, $coordinate->system, $coordinate->position - 1), $occupant);
+
+        $email = "import-retry-system-{$suffix}@example.com";
+        $importer = resolve(PlayerImporter::class);
+        $importer->import($this->temporaryJson($this->playerData("import-retry-system-{$suffix}", $email, $coordinate)));
+        $this->rememberAudit($importer);
+
+        $user = User::query()->where('email', $email)->firstOrFail();
+        $this->createdUserIds[] = $user->id;
+        $planet = Planet::query()
+            ->where('user_id', $user->id)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->firstOrFail();
+        $this->assertSame($coordinate->galaxy, $planet->galaxy);
+        $this->assertSame($coordinate->system + 1, $planet->system);
+        $this->assertSame($coordinate->position, $planet->planet);
+    }
+
+    public function test_retry_upon_collision_aborts_when_the_neighborhood_is_full(): void
+    {
+        config()->set('app.player_import_password', 'import-test-password');
+        config()->set('app.player_import_retry_upon_collision', true);
+
+        $coordinate = $this->getSafeEmptyCoordinate(new Coordinate(1, 300, 8));
+        $suffix = bin2hex(random_bytes(5));
+        $occupant = $this->occupySlot($suffix, $coordinate);
+
+        for ($systemDelta = -PlanetImporter::MAX_COLLISION_OFFSET; $systemDelta <= PlanetImporter::MAX_COLLISION_OFFSET; $systemDelta++) {
+            for ($positionDelta = -PlanetImporter::MAX_COLLISION_OFFSET; $positionDelta <= PlanetImporter::MAX_COLLISION_OFFSET; $positionDelta++) {
+                $system = $coordinate->system + $systemDelta;
+                $position = $coordinate->position + $positionDelta;
+                if (
+                    $position < UniverseConstants::MIN_PLANET_POSITION
+                    || $position > UniverseConstants::MAX_PLANET_POSITION
+                    || $system < UniverseConstants::MIN_SYSTEM
+                    || $system > UniverseConstants::MAX_SYSTEM_COUNT
+                ) {
+                    continue;
+                }
+
+                $this->occupySlot($suffix, new Coordinate($coordinate->galaxy, $system, $position), $occupant);
+            }
+        }
+
+        $email = "import-exhausted-{$suffix}@example.com";
+        $importer = resolve(PlayerImporter::class);
+
+        try {
+            $importer->import($this->temporaryJson($this->playerData("import-exhausted-{$suffix}", $email, $coordinate)));
+            $this->fail('A full neighborhood should stop the import.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('no free slot was found', $exception->getMessage());
+        }
+
+        $this->rememberAudit($importer);
+        $this->assertNull(User::query()->where('email', $email)->first());
+    }
+
+    private function coordinateWithFreeNeighbors(): Coordinate
+    {
+        for ($attempt = 0; $attempt < 30; $attempt++) {
+            $coordinate = $this->getSafeEmptyCoordinate(new Coordinate(1, 280, 8));
+            $neighbors = [
+                [$coordinate->system, $coordinate->position + 1],
+                [$coordinate->system, $coordinate->position - 1],
+                [$coordinate->system + 1, $coordinate->position],
+                [$coordinate->system - 1, $coordinate->position],
+            ];
+
+            foreach ($neighbors as [$system, $position]) {
+                if (
+                    $position < UniverseConstants::MIN_PLANET_POSITION
+                    || $position > UniverseConstants::MAX_PLANET_POSITION
+                    || $system < UniverseConstants::MIN_SYSTEM
+                    || $system > UniverseConstants::MAX_SYSTEM_COUNT
+                ) {
+                    continue 2;
+                }
+
+                $taken = Planet::query()
+                    ->where('galaxy', $coordinate->galaxy)
+                    ->where('system', $system)
+                    ->where('planet', $position)
+                    ->exists();
+                if ($taken) {
+                    continue 2;
+                }
+            }
+
+            return $coordinate;
+        }
+
+        $this->fail('Failed to find a coordinate with free neighboring slots.');
+    }
+
+    private function occupySlot(string $suffix, Coordinate $coordinate, User|null $occupant = null): User
+    {
+        $occupant ??= User::factory()->create([
+            'username' => "occupant-{$suffix}",
+            'email' => "occupant-{$suffix}@example.com",
+        ]);
+        if (!in_array($occupant->id, $this->createdUserIds, true)) {
+            $this->createdUserIds[] = $occupant->id;
+        }
+
+        $occupied = Planet::query()
+            ->where('galaxy', $coordinate->galaxy)
+            ->where('system', $coordinate->system)
+            ->where('planet', $coordinate->position)
+            ->exists();
+        if (!$occupied) {
+            Planet::factory()->create([
+                'user_id' => $occupant->id,
+                'galaxy' => $coordinate->galaxy,
+                'system' => $coordinate->system,
+                'planet' => $coordinate->position,
+                'planet_type' => PlanetType::Planet->value,
+            ]);
+        }
+
+        return $occupant;
+    }
+
+    private function rememberAudit(PlayerImporter $importer): void
+    {
+        if ($importer->auditPath() !== null) {
+            $this->temporaryFiles[] = $importer->auditPath();
+        }
     }
 
     /**

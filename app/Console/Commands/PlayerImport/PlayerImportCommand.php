@@ -25,6 +25,9 @@ class PlayerImportCommand extends Command
                 },
                 function (User $user, int $imported, int $total): void {
                     $this->line("  [{$imported}/{$total}] Imported {$user->username} ({$user->email})");
+                },
+                function (string $username, string $planetName, string $from, string $to): void {
+                    $this->warn("  Relocated {$planetName} ({$username}) from {$from} to {$to}.");
                 }
             );
         } catch (Throwable $exception) {

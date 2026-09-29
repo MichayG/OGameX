@@ -18,6 +18,7 @@ class ResearchImporter
      */
     public function import(PlayerService $player, array $researches): void
     {
+        // Researches omitted from the export stay at level 0. An explicit 0 is still accepted.
         $validated = Validator::make(['researches' => $researches], [
             'researches' => ['array'],
             'researches.*.code' => ['required', 'string', 'distinct'],

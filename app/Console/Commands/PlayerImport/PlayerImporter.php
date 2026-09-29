@@ -107,12 +107,12 @@ class PlayerImporter
             throw new RuntimeException("Unable to read player import file: {$resolvedPath}");
         }
 
-        // Lowercase SHA-256 of the raw source bytes; stored on the audit as
-        // sourceFileChecksum so same-named exports with different contents
-        // remain distinguishable (see ImportAuditWriter::start()).
+        // Lowercase SHA-256 of the raw source bytes, before gzip decompression.
+        // Stored on the audit as sourceFileChecksum so same-named exports with
+        // different contents remain distinguishable (see ImportAuditWriter::start()).
         $sourceFileChecksum = hash('sha256', $contents);
 
-        $document = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+        $document = json_decode($this->jsonContents($contents, $resolvedPath), true, 512, JSON_THROW_ON_ERROR);
         if (!is_array($document)) {
             throw new RuntimeException('Player import JSON must contain an object at its root.');
         }
@@ -127,5 +127,33 @@ class PlayerImporter
         ])->validate();
 
         return [$resolvedPath, $sourceFileChecksum, $validated];
+    }
+
+    /**
+     * Plain JSON and gzip-compressed JSON are both accepted. Gzip is detected
+     * from the file magic bytes, so the extension is not required.
+     */
+    private function jsonContents(string $contents, string $resolvedPath): string
+    {
+        if (!str_starts_with($contents, "\x1f\x8b")) {
+            return $contents;
+        }
+
+        // gzdecode() warns on corrupt input. Swallow that and report one error below.
+        $decoded = false;
+        set_error_handler(static fn (): bool => true);
+        try {
+            $decoded = gzdecode($contents);
+        } catch (Throwable) {
+            $decoded = false;
+        } finally {
+            restore_error_handler();
+        }
+
+        if (!is_string($decoded)) {
+            throw new RuntimeException("Unable to decompress gzip player import file: {$resolvedPath}");
+        }
+
+        return $decoded;
     }
 }

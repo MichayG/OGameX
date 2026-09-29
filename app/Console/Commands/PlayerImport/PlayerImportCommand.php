@@ -9,9 +9,9 @@ use Throwable;
 class PlayerImportCommand extends Command
 {
     protected $signature = 'ogamex:player-import
-                            {path : Path to the JSON file}';
+                            {path : Path to a JSON or gzip-compressed JSON file}';
 
-    protected $description = 'Import player accounts from a JSON file';
+    protected $description = 'Import player accounts from a JSON or gzip-compressed JSON file';
 
     public function handle(PlayerImporter $playerImporter): int
     {

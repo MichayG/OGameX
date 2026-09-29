@@ -22,6 +22,8 @@ class CelestialBodyContentApplier
      */
     public function apply(PlanetService $planet, array $body): void
     {
+        // Buildings, ships, defenses, and resources omitted from the export are
+        // level/amount 0. An explicit 0 may still be present.
         $payload = [
             'buildings' => $body['buildings'] ?? [],
             'fleet' => $body['fleet'] ?? [],
@@ -78,10 +80,12 @@ class CelestialBodyContentApplier
         }
 
         $current = $planet->getResources();
+        // Planets are created with starting metal and crystal, so unspecified
+        // resources are forced to 0 rather than left at those starting amounts.
         $targets = [
-            'metal' => $current->metal->get(),
-            'crystal' => $current->crystal->get(),
-            'deuterium' => $current->deuterium->get(),
+            'metal' => 0,
+            'crystal' => 0,
+            'deuterium' => 0,
         ];
 
         foreach ($validated['resources'] as $resource) {

@@ -21,7 +21,7 @@ class ImportAuditWriter
     private array $audit = [
         'importedAt' => '',
         'sourceFile' => '',
-        // SHA-256 hex digest of the source JSON file bytes (see start()).
+        // SHA-256 hex digest of the raw source file bytes (see start()).
         'sourceFileChecksum' => '',
         'users' => [],
     ];
@@ -30,9 +30,10 @@ class ImportAuditWriter
      * Start a new audit file for this import run.
      *
      * `$sourceFileChecksum` must be the lowercase SHA-256 hex digest of the
-     * exact source JSON file bytes that are being imported. SHA-256 is used
-     * so two imports that reuse the same path/filename can still be distinguished
-     * when their contents differ.
+     * exact source file bytes that are being imported, including the gzip
+     * wrapper when the export is compressed. SHA-256 is used so two imports
+     * that reuse the same path/filename can still be distinguished when their
+     * contents differ.
      *
      * @throws JsonException
      */

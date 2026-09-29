@@ -117,6 +117,122 @@ class PlayerImportTest extends TestCase
         $this->assertFileExists($auditPath);
     }
 
+    public function test_plain_json_and_gzip_treat_missing_entries_as_zero(): void
+    {
+        config()->set('app.player_import_password', 'import-test-password');
+
+        foreach (['json', 'gzip'] as $format) {
+            $coordinate = $this->getSafeEmptyCoordinate(new Coordinate(1, 260, 8));
+            $suffix = bin2hex(random_bytes(5));
+            $email = "import-{$format}-{$suffix}@example.com";
+            $document = $this->sparsePlayerData("import-{$format}-{$suffix}", $email, $coordinate);
+            $sourcePath = $format === 'gzip'
+                ? $this->temporaryGzip($document)
+                : $this->temporaryJson($document);
+
+            $importer = resolve(PlayerImporter::class);
+            $importer->import($sourcePath);
+
+            $auditPath = $importer->auditPath();
+            $this->assertNotNull($auditPath);
+            $this->temporaryFiles[] = $auditPath;
+
+            $user = User::query()->where('email', $email)->firstOrFail();
+            $this->createdUserIds[] = $user->id;
+
+            $tech = UserTech::query()->where('user_id', $user->id)->firstOrFail();
+            $this->assertSame(3, $tech->energy_technology);
+            $this->assertSame(0, $tech->laser_technology);
+            $this->assertSame(0, $tech->weapon_technology);
+
+            $planet = Planet::query()
+                ->where('user_id', $user->id)
+                ->where('planet_type', PlanetType::Planet->value)
+                ->firstOrFail();
+            $this->assertSame(4, $planet->research_lab);
+            $this->assertSame(0, $planet->metal_mine);
+            $this->assertSame(0, $planet->crystal_mine);
+            $this->assertSame(2, $planet->light_fighter);
+            $this->assertSame(0, $planet->colony_ship);
+            $this->assertSame(0, $planet->small_cargo);
+            $this->assertSame(5, $planet->heavy_laser);
+            $this->assertSame(0, $planet->light_laser);
+            $this->assertSame(0, $planet->rocket_launcher);
+            $this->assertSame(0, (int)$planet->metal);
+            $this->assertSame(0, (int)$planet->crystal);
+            $this->assertSame(80, (int)$planet->deuterium);
+
+            $audit = json_decode((string)file_get_contents($auditPath), true, 512, JSON_THROW_ON_ERROR);
+            $this->assertSame(realpath($sourcePath), $audit['sourceFile']);
+            $this->assertSame(hash('sha256', (string)file_get_contents($sourcePath)), $audit['sourceFileChecksum']);
+        }
+    }
+
+    public function test_invalid_gzip_is_rejected(): void
+    {
+        config()->set('app.player_import_password', 'import-test-password');
+
+        $path = tempnam(storage_path('app'), 'player-import-test-');
+        if ($path === false) {
+            $this->fail('Unable to create temporary player import file.');
+        }
+
+        file_put_contents($path, "\x1f\x8b" . 'not-gzip');
+        $this->temporaryFiles[] = $path;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Unable to decompress gzip player import file');
+
+        resolve(PlayerImporter::class)->import($path);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function sparsePlayerData(string $username, string $email, Coordinate $coordinate): array
+    {
+        return [
+            'version' => '1.0',
+            'generatedAt' => now()->toIso8601String(),
+            'players' => [[
+                'profile' => [
+                    'username' => $username,
+                    'email' => $email,
+                    'accountAgeDays' => 12,
+                    'status' => 'active',
+                    'preferredPlaystyle' => 'miner',
+                    'class' => 'general',
+                ],
+                'planets' => [[
+                    'kind' => 'planet',
+                    'name' => 'Sparse',
+                    'isMain' => true,
+                    'position' => $coordinate->asString(),
+                    'buildings' => [
+                        ['code' => 'research_lab', 'level' => 4],
+                        ['code' => 'metal_mine', 'level' => 0],
+                    ],
+                    'fleet' => [
+                        ['code' => 'light_fighter', 'amount' => 2],
+                        ['code' => 'colony_ship', 'amount' => 0],
+                    ],
+                    'defenses' => [
+                        ['code' => 'heavy_laser', 'amount' => 5],
+                        ['code' => 'light_laser', 'amount' => 0],
+                    ],
+                    'resources' => [
+                        ['code' => 'crystal', 'amount' => 0],
+                        ['code' => 'deuterium', 'amount' => 80],
+                    ],
+                ]],
+                'researches' => [
+                    ['code' => 'energy_technology', 'level' => 3],
+                    ['code' => 'laser_technology', 'level' => 0],
+                ],
+            ]],
+        ];
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -180,6 +296,27 @@ class PlayerImportTest extends TestCase
         }
 
         file_put_contents($path, json_encode($document, JSON_THROW_ON_ERROR));
+        $this->temporaryFiles[] = $path;
+
+        return $path;
+    }
+
+    /**
+     * @param array<string, mixed> $document
+     */
+    private function temporaryGzip(array $document): string
+    {
+        $path = tempnam(storage_path('app'), 'player-import-test-');
+        if ($path === false) {
+            $this->fail('Unable to create temporary player import file.');
+        }
+
+        $encoded = gzencode((string)json_encode($document, JSON_THROW_ON_ERROR));
+        if ($encoded === false) {
+            $this->fail('Unable to gzip player import JSON.');
+        }
+
+        file_put_contents($path, $encoded);
         $this->temporaryFiles[] = $path;
 
         return $path;

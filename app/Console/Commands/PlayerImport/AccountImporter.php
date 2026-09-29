@@ -12,6 +12,8 @@ use RuntimeException;
 
 class AccountImporter
 {
+    private string|null $passwordHash = null;
+
     public function ensurePasswordIsConfigured(): void
     {
         if ($this->password() === '') {
@@ -45,7 +47,7 @@ class AccountImporter
             $user = new User();
             $user->username = $validated['username'];
             $user->email = $validated['email'];
-            $user->password = Hash::make($this->password());
+            $user->password = $this->hashedPassword();
             $user->lang = 'en';
             $user->register_time = (string)$registeredAt->timestamp;
             // Last activity timestamp (galaxy inactive status / online checks).
@@ -78,6 +80,14 @@ class AccountImporter
     private function password(): string
     {
         return trim((string)config('app.player_import_password', ''));
+    }
+
+    /**
+     * Every imported account uses the same password, so bcrypt runs once per import.
+     */
+    private function hashedPassword(): string
+    {
+        return $this->passwordHash ??= Hash::make($this->password());
     }
 
     private function characterClass(mixed $class): CharacterClass|null

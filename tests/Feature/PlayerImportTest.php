@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Hash;
+use OGame\Console\Commands\PlayerImport\AccountImporter;
 use OGame\Console\Commands\PlayerImport\PlanetImporter;
 use OGame\Console\Commands\PlayerImport\PlayerImporter;
 use OGame\Console\Commands\PlayerImport\PlayerImportRollback;
@@ -168,6 +169,33 @@ class PlayerImportTest extends TestCase
             $this->assertSame(realpath($sourcePath), $audit['sourceFile']);
             $this->assertSame(hash('sha256', (string)file_get_contents($sourcePath)), $audit['sourceFileChecksum']);
         }
+    }
+
+    public function test_imported_accounts_share_one_password_hash(): void
+    {
+        config()->set('app.player_import_password', 'import-test-password');
+
+        $suffix = bin2hex(random_bytes(5));
+        $importer = resolve(AccountImporter::class);
+        $profile = [
+            'accountAgeDays' => 1,
+            'status' => 'active',
+        ];
+
+        $first = $importer->import($profile + [
+            'username' => "hash-a-{$suffix}",
+            'email' => "hash-a-{$suffix}@example.com",
+        ]);
+        $second = $importer->import($profile + [
+            'username' => "hash-b-{$suffix}",
+            'email' => "hash-b-{$suffix}@example.com",
+        ]);
+        $this->createdUserIds[] = $first->id;
+        $this->createdUserIds[] = $second->id;
+
+        // Bcrypt includes a random salt, so equal hashes mean the password was hashed once.
+        $this->assertSame($first->password, $second->password);
+        $this->assertTrue(Hash::check('import-test-password', $first->password));
     }
 
     public function test_inactive_status_sets_last_activity_seven_days_ago(): void

@@ -2,6 +2,26 @@
 
 The player import commands create complete player snapshots from a JSON or gzip-compressed JSON export and retain an audit file that can be used to delete those accounts.
 
+## TL;DR
+
+⚠️ Import takes ~1.5sec per player. For 1000 players, 25min.
+
+```bash
+# Get OGameX running
+cp .env.example-prod .env  # Set PLAYER_IMPORT_PASSWORD=secret
+docker compose -f docker-compose.prod.yml up -d --build --force-recreate
+
+# Launch import
+mv /path/to/ogame-player-generation/dist/players.json.gz .
+docker compose exec ogamex-app php artisan ogamex:player-import /var/www/players.json.gz
+
+# Refresh cache if you changed an ENV variable
+docker compose exec ogamex-app php artisan config:clear
+
+# Rollback in case of error
+docker compose exec ogamex-app php artisan ogamex:player-import:rollback /var/www/storage/app/player-import/import-20260929-224546.json
+```
+
 ## Prerequisites
 
 Set one password for all imported accounts in the project `.env`:
@@ -72,11 +92,7 @@ Pass the audit file printed by the import command:
 
 ```bash
 docker compose exec ogamex-app php artisan ogamex:player-import:rollback /var/www/storage/app/player-import/import-20260725-134500.json
-```
-
-The command asks for confirmation. For non-interactive use:
-
-```bash
+# The command asks for confirmation. For non-interactive use:
 docker compose exec ogamex-app php artisan ogamex:player-import:rollback /var/www/storage/app/player-import/import-20260725-134500.json --force
 ```
 

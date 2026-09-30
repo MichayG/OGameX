@@ -57,6 +57,7 @@ class PlayerImportTest extends TestCase
         $document = [
             'version' => '1.0',
             'generatedAt' => now()->toIso8601String(),
+            'seed' => 2026,
             'players' => [
                 $this->playerData("import-{$suffix}", $email, $coordinate),
                 $this->playerData("import-failure-{$suffix}", $email, $coordinate),
@@ -464,6 +465,7 @@ class PlayerImportTest extends TestCase
         return [
             'version' => '1.0',
             'generatedAt' => now()->toIso8601String(),
+            'seed' => 2026,
             'players' => [[
                 'profile' => [
                     'username' => $username,
@@ -564,6 +566,7 @@ class PlayerImportTest extends TestCase
         return [
             'version' => '1.0',
             'generatedAt' => now()->toIso8601String(),
+            'seed' => 2026,
             'players' => [$player],
         ];
     }

@@ -102,7 +102,7 @@ class PlayerImporter
      * @return array{
      *     0: string,
      *     1: string,
-     *     2: array{players: array<int, array<string, mixed>>}
+     *     2: array{players: array<int, array<string, mixed>>, seed?: int}
      * }
      *
      * @throws JsonException
@@ -129,8 +129,10 @@ class PlayerImporter
             throw new RuntimeException('Player import JSON must contain an object at its root.');
         }
 
-        /** @var array{players: array<int, array<string, mixed>>} $validated */
+        /** @var array{players: array<int, array<string, mixed>>, seed?: int} $validated */
         $validated = Validator::make($document, [
+            // Generator seed. Accepted and unused; imports do not depend on it.
+            'seed' => ['sometimes', 'integer'],
             'players' => ['required', 'array', 'min:1'],
             'players.*' => ['array'],
             'players.*.profile' => ['required', 'array'],

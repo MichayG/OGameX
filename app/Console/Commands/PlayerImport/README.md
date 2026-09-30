@@ -4,7 +4,15 @@ The player import commands create complete player snapshots from a JSON or gzip-
 
 ## TL;DR
 
-⚠️ Import takes ~1.5sec per player. For 1000 players, 25min.
+⚠️ Import takes ~1.5sec per player and increases significantly as playerbase grows.
+
+- 100 players  ≈ 2 min
+- 500 players  ≈ 15 min
+- 1000 players ≈ 40 min
+- 1600 players ≈ 1h20
+
+Note: highscores may also take a while to update.
+
 
 ```bash
 # Get OGameX running
@@ -20,6 +28,11 @@ docker compose exec ogamex-app php artisan config:clear
 
 # Rollback in case of error
 docker compose exec ogamex-app php artisan ogamex:player-import:rollback /var/www/storage/app/player-import/import-20260929-224546.json
+
+# (Optional) Update highscores manually
+docker compose exec ogamex-app php artisan ogamex:scheduler:generate-highscores
+docker compose exec ogamex-app php artisan ogamex:scheduler:generate-alliance-highscores
+docker compose exec ogamex-app php artisan ogamex:scheduler:generate-highscore-ranks
 ```
 
 ## Prerequisites

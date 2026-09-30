@@ -9,6 +9,7 @@ use JsonException;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\User;
 use RuntimeException;
+use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 
 class PlayerImporter
@@ -19,7 +20,8 @@ class PlayerImporter
         private PlanetImporter $planetImporter,
         private ImportRequirementsValidator $requirementsValidator,
         private PlayerServiceFactory $playerServiceFactory,
-        private ImportAuditWriter $auditWriter
+        private ImportAuditWriter $auditWriter,
+        private HighscoreMaintenance $highscoreMaintenance
     ) {
     }
 
@@ -35,7 +37,8 @@ class PlayerImporter
         string $sourcePath,
         Closure|null $onAuditCreated = null,
         Closure|null $onUserImported = null,
-        Closure|null $onPlanetRelocated = null
+        Closure|null $onPlanetRelocated = null,
+        OutputInterface|null $output = null
     ): array {
         $this->accountImporter->ensurePasswordIsConfigured();
         [$resolvedPath, $sourceFileChecksum, $document] = $this->loadDocument($sourcePath);
@@ -44,8 +47,42 @@ class PlayerImporter
         $onAuditCreated?->__invoke($auditPath);
 
         $players = $document['players'];
-        $total = count($players);
         $imported = 0;
+
+        // Scheduled highscore jobs would otherwise rebuild a partial board every
+        // five minutes and could overwrite the single refresh at the end.
+        $this->highscoreMaintenance->pause();
+
+        try {
+            $this->importPlayers(
+                $players,
+                $onUserImported,
+                $onPlanetRelocated,
+                $imported
+            );
+            $this->highscoreMaintenance->refresh($output);
+        } finally {
+            $this->highscoreMaintenance->resume();
+        }
+
+        return [
+            'auditPath' => $auditPath,
+            'imported' => $imported,
+        ];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $players
+     * @param Closure(User, int, int): void|null $onUserImported
+     * @param Closure(string, string, string, string): void|null $onPlanetRelocated
+     */
+    private function importPlayers(
+        array $players,
+        Closure|null $onUserImported,
+        Closure|null $onPlanetRelocated,
+        int &$imported
+    ): void {
+        $total = count($players);
 
         foreach ($players as $index => $playerData) {
             $label = $playerData['profile']['username'] ?? '#' . ($index + 1);
@@ -86,11 +123,6 @@ class PlayerImporter
             $imported++;
             $onUserImported?->__invoke($user, $imported, $total);
         }
-
-        return [
-            'auditPath' => $auditPath,
-            'imported' => $imported,
-        ];
     }
 
     public function auditPath(): string|null

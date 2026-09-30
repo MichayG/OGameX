@@ -28,13 +28,17 @@ class PlayerImportCommand extends Command
                 },
                 function (string $username, string $planetName, string $from, string $to): void {
                     $this->warn("  Relocated {$planetName} ({$username}) from {$from} to {$to}.");
-                }
+                },
+                $this->output
             );
         } catch (Throwable $exception) {
             $this->error($exception->getMessage());
 
             if ($playerImporter->auditPath() !== null) {
-                $this->warn('Audit file (partial import): ' . $playerImporter->auditPath());
+                $label = str_starts_with($exception->getMessage(), 'Failed to import player')
+                    ? 'Audit file (partial import): '
+                    : 'Audit file: ';
+                $this->warn($label . $playerImporter->auditPath());
             }
 
             return self::FAILURE;

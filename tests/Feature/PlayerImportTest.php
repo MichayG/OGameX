@@ -2,8 +2,11 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Hash;
 use OGame\Console\Commands\PlayerImport\AccountImporter;
+use OGame\Console\Commands\PlayerImport\HighscoreMaintenance;
 use OGame\Console\Commands\PlayerImport\PlanetImporter;
 use OGame\Console\Commands\PlayerImport\PlayerImporter;
 use OGame\Console\Commands\PlayerImport\PlayerImportRollback;
@@ -11,6 +14,7 @@ use OGame\Enums\CharacterClass;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameConstants\UniverseConstants;
 use OGame\Models\Enums\PlanetType;
+use OGame\Models\Highscore;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\User;
@@ -20,6 +24,14 @@ use Tests\TestCase;
 
 class PlayerImportTest extends TestCase
 {
+    /**
+     * Each imported player is committed in its own transaction. This outer
+     * transaction turns those commits into savepoints, so a test killed during
+     * the highscore refresh cannot leave accounts in the application database.
+     * Closing the connection rolls the transaction back.
+     */
+    use DatabaseTransactions;
+
     /**
      * @var array<int, int>
      */
@@ -89,6 +101,11 @@ class PlayerImportTest extends TestCase
         $tech = UserTech::query()->where('user_id', $user->id)->firstOrFail();
         $this->assertSame(4, $tech->weapon_technology);
 
+        // A failed run does not rebuild highscores. The committed player keeps the placeholder row.
+        $highscore = Highscore::query()->where('player_id', $user->id)->firstOrFail();
+        $this->assertSame(0, $highscore->general);
+        $this->assertFalse(resolve(HighscoreMaintenance::class)->isPaused());
+
         $planet = Planet::query()
             ->where('user_id', $user->id)
             ->where('planet_type', PlanetType::Planet->value)
@@ -119,6 +136,67 @@ class PlayerImportTest extends TestCase
         $this->assertNull(User::query()->find($user->id));
         $this->createdUserIds = [];
         $this->assertFileExists($auditPath);
+    }
+
+    public function test_successful_import_scores_players_and_orders_them_by_points(): void
+    {
+        config()->set('app.player_import_password', 'import-test-password');
+
+        $suffix = bin2hex(random_bytes(5));
+        $players = [];
+        foreach ([10 => 'weak', 20 => 'strong'] as $mineLevel => $label) {
+            $player = $this->playerData(
+                "import-{$label}-{$suffix}",
+                "import-{$label}-{$suffix}@example.com",
+                $this->getSafeEmptyCoordinate(new Coordinate(1, $mineLevel === 10 ? 270 : 280, 8))
+            );
+            $player['planets'][0]['buildings'] = [
+                ['code' => 'metal_mine', 'level' => $mineLevel],
+            ];
+            $player['planets'][0]['fleet'] = [];
+            $player['planets'][0]['defenses'] = [];
+            $player['planets'][0]['moon'] = null;
+            $player['researches'] = [];
+            $players[$label] = $player;
+        }
+
+        $importer = resolve(PlayerImporter::class);
+        $importer->import($this->temporaryJson([
+            'version' => '1.0',
+            'generatedAt' => now()->toIso8601String(),
+            'seed' => 2026,
+            'players' => [$players['weak'], $players['strong']],
+        ]));
+        $this->rememberAudit($importer);
+
+        $weakerUser = User::query()->where('email', $players['weak']['profile']['email'])->firstOrFail();
+        $strongerUser = User::query()->where('email', $players['strong']['profile']['email'])->firstOrFail();
+        $this->createdUserIds[] = $weakerUser->id;
+        $this->createdUserIds[] = $strongerUser->id;
+
+        $weakerScore = Highscore::query()->where('player_id', $weakerUser->id)->firstOrFail();
+        $strongerScore = Highscore::query()->where('player_id', $strongerUser->id)->firstOrFail();
+
+        $this->assertGreaterThan(0, $weakerScore->general);
+        $this->assertGreaterThan($weakerScore->general, $strongerScore->general);
+        $this->assertLessThan($weakerScore->general_rank, $strongerScore->general_rank);
+        $this->assertFalse(resolve(HighscoreMaintenance::class)->isPaused());
+    }
+
+    public function test_scheduled_highscore_jobs_wait_while_an_import_is_running(): void
+    {
+        $maintenance = resolve(HighscoreMaintenance::class);
+        $maintenance->resume();
+
+        try {
+            $this->assertTrue($this->scheduledHighscoreJobsAreDue());
+            $maintenance->pause();
+            $this->assertFalse($this->scheduledHighscoreJobsAreDue());
+        } finally {
+            $maintenance->resume();
+        }
+
+        $this->assertTrue($this->scheduledHighscoreJobsAreDue());
     }
 
     public function test_plain_json_and_gzip_treat_missing_entries_as_zero(): void
@@ -448,6 +526,35 @@ class PlayerImportTest extends TestCase
         }
 
         return $occupant;
+    }
+
+    private function scheduledHighscoreJobsAreDue(): bool
+    {
+        $commands = [
+            'ogamex:scheduler:generate-highscores',
+            'ogamex:scheduler:generate-alliance-highscores',
+            'ogamex:scheduler:generate-highscore-ranks',
+        ];
+        $events = collect(resolve(Schedule::class)->events())
+            ->filter(function ($event) use ($commands): bool {
+                foreach ($commands as $command) {
+                    if (str_contains((string)$event->command, $command)) {
+                        return true;
+                    }
+                }
+
+                return false;
+            });
+
+        $this->assertCount(3, $events);
+
+        foreach ($events as $event) {
+            if (!$event->filtersPass($this->app)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function rememberAudit(PlayerImporter $importer): void

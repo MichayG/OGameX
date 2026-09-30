@@ -1,5 +1,6 @@
 <?php
 
+use OGame\Console\Commands\PlayerImport\HighscoreMaintenance;
 use OGame\Console\Commands\Scheduler\CleanupWreckFields;
 use OGame\Console\Commands\Scheduler\DarkMatterRegenerateCommand;
 use OGame\Console\Commands\Scheduler\DeleteOldMessages;
@@ -19,11 +20,14 @@ use OGame\Console\Commands\Scheduler\ResetDebrisFields;
 |
 */
 
-Schedule::command(GenerateHighscores::class)->everyFiveMinutes();
+// Player import pauses these until it has scored the new players and rebuilt ranks once.
+$highscoresScheduled = static fn (): bool => !resolve(HighscoreMaintenance::class)->isPaused();
+
+Schedule::command(GenerateHighscores::class)->everyFiveMinutes()->when($highscoresScheduled);
 // Alliance highscores should run after player highscores since they depend on them
-Schedule::command(GenerateAllianceHighscores::class)->everyFiveMinutes();
+Schedule::command(GenerateAllianceHighscores::class)->everyFiveMinutes()->when($highscoresScheduled);
 // Generates ranks for both player and alliance highscores
-Schedule::command(GenerateHighscoreRanks::class)->everyFiveMinutes();
+Schedule::command(GenerateHighscoreRanks::class)->everyFiveMinutes()->when($highscoresScheduled);
 
 // Reset empty debris fields weekly on Monday at 1:00 AM
 Schedule::command(ResetDebrisFields::class)->weeklyOn(1, '1:00');

@@ -97,3 +97,19 @@ docker compose exec ogamex-app php artisan ogamex:player-import:rollback /var/ww
 ```
 
 Rollback calls `PlayerService::delete()` for every recorded ID, cleaning the user's planets, queues, fleet missions, messages, highscores, and research. Missing users are skipped. Audit files are deliberately retained for history.
+
+
+## Why no AI ?
+
+It's in the roadmap to explore, at the very list.
+
+There's been discussions about it for a while online:
+
+- https://github.com/lanedirt/OGameX/discussions/1596
+- https://github.com/lanedirt/OGameX/issues/1550
+
+Forks/projects:
+
+- https://github.com/halfguru/ogamebot
+- https://github.com/hammermaps/OGameX-AI-Players
+- https://github.com/Shinigallo/ogame-agi
